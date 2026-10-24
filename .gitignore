@@ -1,0 +1,28 @@
+# Local recordings, review data, exports, and rebuildable caches
+/.cache/
+/output/
+/recordings/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store
+*.part
+*.ytdl
+
+# Local credentials and browser sessions
+.env
+.env.*
+!.env.example
+.aws/
+*cookie*.txt
+*.binarycookies
+
+# Local opening clips and third-party media; do not redistribute with source code
+/media/*
+!/media/.gitkeep
+/intro/*.mp4
+/intro/lakers-logo.svg
+/intro/video-verification.json
+/assets/teams/*.svg
+/assets/nba2k*-logo.png

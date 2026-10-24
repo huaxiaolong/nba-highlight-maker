@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>湖人 · 开场动画预览</title>
+  <style>
+    :root { color-scheme: dark; --gold:#fdb927; --purple:#552583; --paper:#fff1ce; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; background:#160a23; color:var(--paper); font:14px/1.5 "Avenir Next","PingFang SC",sans-serif; }
+    main { width:min(1440px,96vw); margin:clamp(16px,4vh,48px) auto; }
+    header { display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:16px; }
+    h1 { margin:0; font-size:18px; font-weight:600; letter-spacing:.08em; }
+    .note { color:#b5a1c6; font-size:12px; }
+    .viewport { width:100%; aspect-ratio:16/9; overflow:hidden; position:relative; background:#29103e; box-shadow:0 24px 60px #09020d66; }
+    .scene { position:absolute; width:1920px; height:1080px; transform-origin:0 0; transform:scale(var(--scale,1)); overflow:hidden; isolation:isolate; background:#36134f; }
+    .matte { position:absolute; inset:0; background:linear-gradient(118deg,#421660 0%,#552583 43%,#2b1045 100%); }
+    .emblem { position:absolute; width:1000px; height:1000px; left:460px; top:35px; transform-origin:48.7% 50.5%; }
+    .logo-wrap { opacity:0; }
+    .opening-word { position:absolute; inset:0; display:grid; place-items:center; opacity:0; color:var(--gold); font:italic 900 420px/1 Impact,"Arial Narrow",sans-serif; letter-spacing:.035em; }
+    .opening-city { position:absolute; inset:0; display:grid; place-items:center; opacity:0; color:var(--paper); font:600 48px/1 "Avenir Next",Arial,sans-serif; letter-spacing:.35em; }
+    .logo { display:block; width:100%; height:100%; object-fit:contain; }
+    .controls { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:20px 0 12px; }
+    button { font:inherit; border:1px solid #a778c45c; background:#29143c; color:var(--paper); border-radius:5px; padding:9px 16px; min-height:42px; }
+    button { cursor:pointer; }
+    button.primary { background:var(--gold); border-color:var(--gold); color:#2d123e; font-weight:700; min-width:80px; }
+    button:hover { filter:brightness(1.1); }
+    :focus-visible { outline:2px solid var(--gold); outline-offset:4px; }
+    .seek { flex:1; min-width:150px; accent-color:var(--gold); cursor:pointer; }
+    output { color:#d4bdde; font:13px/1.4 ui-monospace,monospace; min-width:106px; }
+    .status { margin:0; color:#b5a1c6; font-size:12px; }
+    @media(max-width:620px) { header { align-items:flex-start; flex-direction:column; gap:4px; } .controls { gap:9px; } .seek { flex-basis:65%; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header><h1>湖人 · 开场动画</h1><span class="note">统一开场 · 4 秒 · 无声预览</span></header>
+    <div class="viewport" id="viewport">
+      <div class="scene" id="scene" role="img" aria-label="湖人紫金配色开场动画">
+        <div class="matte"></div>
+        <div class="opening-word" id="opening-word" aria-hidden="true">LAKERS</div>
+        <div class="opening-city" id="opening-city" aria-hidden="true">LOS ANGELES</div>
+        <div class="emblem logo-wrap" id="logo-wrap"><img class="logo" id="logo" src="lakers-logo.svg" alt="Los Angeles Lakers 官方球队标识"></div>
+      </div>
+    </div>
+    <div class="controls">
+      <button id="play" class="primary" type="button">播放</button>
+      <button id="replay" type="button">重播</button>
+      <input class="seek" id="seek" type="range" min="0" max="4" step="0.01" value="0" aria-label="预览时间，单位秒">
+      <output id="time" for="seek">0.00 / 4.00 秒</output>
+    </div>
+    <p class="status" id="status" role="status">正在加载本地 Logo…</p>
+  </main>
+  <script>
+    const duration = 4;
+    const $ = id => document.getElementById(id);
+    const clamp = value => Math.max(0, Math.min(1, value));
+    const phase = (time, from, to) => clamp((time - from) / (to - from));
+    const ease = value => 1 - Math.pow(1 - value, 3);
+    let time = 0, playing = false, raf = 0, started = 0;
+    function renderFrame(value) {
+      time = Math.max(0, Math.min(duration, Number(value) || 0));
+      const word = ease(phase(time, 0, 0.2)) * (1-ease(phase(time, 0.95, 1.15)));
+      const city = ease(phase(time, 1.15, 1.35)) * (1-ease(phase(time, 2, 2.4)));
+      const reveal = ease(phase(time, 2, 2.7));
+      $('opening-word').style.opacity = word;
+      $('opening-city').style.opacity = city;
+      $('logo-wrap').style.opacity = reveal;
+      $('logo-wrap').style.transform = `scale(${0.96+reveal*0.04})`;
+      $('seek').value = time;
+      $('time').textContent = `${time.toFixed(2)} / 4.00 秒`;
+      return time;
+    }
+    function pause() {
+      playing = false;
+      cancelAnimationFrame(raf);
+      $('play').textContent = '播放';
+      $('play').setAttribute('aria-label', '播放动画');
+      $('status').textContent = time >= duration ? '动画结束，已定格。可以重播或拖动查看。' : '已暂停，可以拖动时间查看。';
+    }
+    function tick(now) {
+      if (!playing) return;
+      renderFrame((now-started)/1000);
+      if (time >= duration) { pause(); return; }
+      raf = requestAnimationFrame(tick);
+    }
+    function play(from = time) {
+      cancelAnimationFrame(raf);
+      renderFrame(from >= duration ? 0 : from);
+      playing = true;
+      started = performance.now() - time*1000;
+      $('play').textContent = '暂停';
+      $('play').setAttribute('aria-label', '暂停动画');
+      $('status').textContent = '播放中 · 湖人紫金开场';
+      raf = requestAnimationFrame(tick);
+    }
+    function fit() { $('scene').style.setProperty('--scale', $('viewport').clientWidth/1920); }
+    $('play').addEventListener('click', () => playing ? pause() : play());
+    $('replay').addEventListener('click', () => play(0));
+    $('seek').addEventListener('input', () => { pause(); renderFrame($('seek').value); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+    new ResizeObserver(fit).observe($('viewport'));
+    fit(); renderFrame(0);
+    Promise.all([$('logo').decode(), document.fonts.ready]).then(() => {
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) { renderFrame(duration); pause(); }
+      else play(0);
+    }).catch(() => {
+      pause(); $('status').textContent = 'Logo 加载失败，请确认 lakers-logo.svg 与 HTML 在同一目录。';
+    });
+  </script>
+</body>
+</html>
