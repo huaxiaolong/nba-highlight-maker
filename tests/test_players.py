@@ -22,6 +22,23 @@ def game_info():
 
 
 class PlayerTests(unittest.TestCase):
+    def test_analysis_requires_selection_before_ocr_and_reuses_saved_selection(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/'Q1.mp4').write_bytes(b'video')
+            output=root/'output'/'0022600102'
+            info=dict(game_info(),home='LAL',away='GSW')
+            args=SimpleNamespace(game_id='0022600102',game_dir=str(root),refresh_data=False)
+            with patch.object(processing,'ROOT',root),patch.object(processing,'load_game',return_value=(dict(actions=[]),info)),patch.object(processing,'vision_binary') as vision:
+                with self.assertRaisesRegex(ValueError,'先选择球员'):
+                    processing.analyze(args)
+                vision.assert_not_called()
+                self.assertFalse((output/'events.json').exists())
+                processing.atomic_json(output/'players.json',dict(selected_players=['201939']))
+                with patch.object(processing,'select_events',return_value=[]) as events,patch.object(processing,'vision_binary',side_effect=RuntimeError('stop before OCR')):
+                    with self.assertRaisesRegex(RuntimeError,'stop before OCR'):
+                        processing.analyze(args)
+                self.assertEqual(list(events.call_args.args[2]),['201939'])
+
     def test_export_only_selected_players_and_rejects_empty_selection(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);source=root/'source.mp4';source.write_bytes(b'source')
@@ -37,7 +54,7 @@ class PlayerTests(unittest.TestCase):
             def render(source,start,end,destination,**kwargs):destination.write_bytes(b'clip')
             def run(command,**kwargs):Path(command[-1]).write_bytes(b'final')
             args=SimpleNamespace(review=str(review),players=['201939'],scenery=False,watermark=False)
-            with patch.object(processing,'probe',return_value=10),patch.object(processing,'render_clip',side_effect=render),patch.object(processing,'run',side_effect=run),patch('nba_highlight_maker.cover.generate_cover',return_value=root/'cover.png') as cover:
+            with patch.object(processing,'probe_frame_rate',return_value='25'),patch.object(processing,'probe',return_value=10),patch.object(processing,'render_clip',side_effect=render),patch.object(processing,'run',side_effect=run),patch('nba_highlight_maker.cover.generate_cover',return_value=root/'cover.png') as cover:
                 processing.export(args)
                 cover.assert_called_once_with(root.resolve(),review=review.resolve(),players=['201939'])
                 metadata=json.loads((root/'export.json').read_text())

@@ -41,10 +41,27 @@ class ReviewStore:
         self.selected=Path(selected).expanduser().resolve() if selected else None
         self.reviews={}
         self.media={}
+        self.game_dirs={}
         self.lock=threading.RLock()
 
     def library(self):
         paths=set((self.root/'output').rglob('review.csv'))
+        directories={}
+        for base in (self.root/'recordings',Path.home()/'Movies'/'NBA'/'games'):
+            for manifest in sorted(base.glob('*/recordings.json')):
+                try:
+                    game_id=json.loads(manifest.read_text())['game_id']
+                    directories.setdefault(game_id,manifest.parent.resolve())
+                except (OSError,ValueError,KeyError,TypeError):continue
+        for source in (self.root/'output').glob('*/source.json'):
+            directory=source.parent
+            registry=directory/'download.json'
+            try:
+                game_dir=Path(json.loads(registry.read_text())['game_dir']).expanduser().resolve() if registry.exists() else directories.get(directory.name)
+                if game_dir and nh.discover_sources(game_dir,directory.name):
+                    directories[directory.name]=game_dir
+                    paths.add(directory/'review.csv')
+            except (OSError,ValueError,KeyError,TypeError):continue
         if self.selected:
             if not self.selected.is_file():raise ValueError('审核表不存在：'+str(self.selected))
             paths.add(self.selected)
@@ -53,6 +70,7 @@ class ReviewStore:
             path=path.resolve()
             identifier=hashlib.sha256(str(path).encode()).hexdigest()[:16]
             self.reviews[identifier]=path
+            self.game_dirs[identifier]=directories.get(path.parent.name)
             try:
                 relative=path.parent.relative_to(self.root/'output')
                 label=str(relative)
@@ -71,6 +89,7 @@ class ReviewStore:
                 elif version=='multi-source':version='多源版本'
                 label=f"{game['date']} {game['away_name']} vs {game['home_name']} · {version}"
             except (OSError,ValueError,KeyError,TypeError,AttributeError):pass
+            if not path.exists():label+=' · 待分析'
             boards.append(dict(id=identifier,label=label,selected=path==self.selected))
         totals=Counter(board['label'] for board in boards)
         seen=Counter()
@@ -84,6 +103,9 @@ class ReviewStore:
     def read(self,identifier):
         if identifier not in self.reviews:raise ValueError('审核项目不存在，请刷新列表')
         path=self.reviews[identifier]
+        if not path.exists() and self.game_dirs.get(identifier):
+            content=(path.parent/'source.json').read_bytes()
+            return path,list(nh.FIELDS),[],hashlib.sha256(content).hexdigest()
         content=path.read_bytes()
         reader=csv.DictReader(io.StringIO(content.decode('utf-8-sig'),newline=''))
         fields=reader.fieldnames;rows=list(reader)
@@ -206,9 +228,12 @@ class ReviewStore:
                 publication['state']='stale'
             saved=load_selection(path.parent)
             selected=select_keys(people,saved) if saved is not None else [key for key in (publication['export_players'] or list(dict.fromkeys(r['player'] for r in rows))) if key in people]
+            game_dir=self.game_dirs.get(identifier)
+            if not game_dir and sources:game_dir=Path(sources[0]).parent
+            analyze_command=' '.join(shlex.quote(part) for part in ['python3',str(self.root/'scripts'/'nba_highlights.py'),'analyze','--game-id',info.get('game_id',''),'--game-dir',str(game_dir),'--output-dir',str(path.parent)]) if game_dir and info.get('game_id') else ''
             if publication['state']=='ready' and publication['export_players'] is not None and set(publication['export_players'])!=set(selected):
                 publication['state']='stale'
-            return dict(id=identifier,revision=revision,review=str(path),title=f'{away} @ {home}' if away and home else path.parent.name,
+            return dict(id=identifier,revision=revision,review=str(path),analyzed=path.exists(),analyze_command=analyze_command,title=f'{away} @ {home}' if away and home else path.parent.name,
                         game_id=info.get('game_id',''),rows=views,counts=counts,publication=publication,
                         opening_files=self.opening_files(),prepend=prepend,
                         roster=[dict(p,key=key,team_label=NAMES.get(p['team'],p['team'])) for key,p in people.items()],selected_players=selected,
@@ -223,6 +248,9 @@ class ReviewStore:
             people=load_roster(path.parent)
             keys=select_keys(people,data.get('players'))
             if 'players' not in data:raise ValueError('请勾选出场球员')
+            if not path.exists():
+                nh.atomic_json(path.parent/'players.json',dict(selected_players=keys))
+                return self.snapshot(identifier)
             events=nh.review_events(path.parent,{key:(people[key]['id'],people[key]['last_name']) for key in keys},rows)
             sources=self.sources(path,rows)
             caches={}
@@ -382,7 +410,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
 
 def serve(args):
     store=ReviewStore(selected=args.review)
-    if not store.library():raise ValueError('没有 review.csv；请先执行 analyze')
+    store.library()
     if not 0<=args.port<=65535:raise ValueError('端口必须在 0—65535 之间')
     with ThreadingHTTPServer(('127.0.0.1',args.port),ReviewHandler) as server:
         server.store=store

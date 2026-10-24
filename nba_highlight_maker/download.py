@@ -190,6 +190,7 @@ def download_all(args):
     if manifest.get('game_id')!=args.game_id:
         raise ValueError('该目录属于另一场比赛，拒绝混入录像')
     print(f"归档比赛：{info['away']} @ {info['home']}；目录：{game_dir}",flush=True)
+    nh.atomic_json(nh.ROOT/'output'/args.game_id/'download.json',dict(game_dir=str(game_dir)))
     for index,url in enumerate(args.urls,1):
         print(f'[{index}/{len(args.urls)}] 处理：{url}',flush=True)
         prior=next((r for r in manifest['recordings'] if r.get('url')==url),None)
@@ -248,6 +249,7 @@ def download_all(args):
         except (OSError,ValueError,RuntimeError) as error:
             nh.atomic_json(stage/'error.json',dict(url=url,error=str(error),retained_download=str(source)))
             raise RuntimeError(f'{error}\n已保留下载与识别记录：{stage}') from error
+    print('下载完成。打开审核台，勾选球员后复制分析命令。',flush=True)
     return game_dir
 
 

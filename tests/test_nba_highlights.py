@@ -183,7 +183,8 @@ class ExportTests(unittest.TestCase):
             for filename,data in [('review.csv',rows),('candidates.csv',[dict(r,start='555',end='565') for r in rows])]:
                 with (root/filename).open('w',newline='') as file:
                     writer=csv.DictWriter(file,fieldnames=nh.FIELDS);writer.writeheader();writer.writerows(data)
-            def render(source,start,end,destination,progress=None,watermark=False):
+            def render(source,start,end,destination,progress=None,watermark=False,frame_rate=None):
+                self.assertEqual(frame_rate,'25')
                 self.assertEqual(watermark,Path(source).name=='Q3.mp4')
                 self.assertIn((start,end),[(0,136),(0,4),(555,565)]);destination.write_bytes(b'clip')
                 self.assertEqual(progress.total,end-start);progress.update(end-start)
@@ -191,7 +192,7 @@ class ExportTests(unittest.TestCase):
                 self.assertEqual(progress.total,10);progress.update(10)
                 self.assertEqual(Path(command[command.index('-i')+1]).read_text(),"file '0000.mp4'\n")
                 Path(command[-1]).write_bytes(b'final');return ''
-            with patch('nba_highlight_maker.cover.generate_cover',return_value=root/'cover.png') as cover,patch.object(nh,'ROOT',root),patch.object(nh,'probe',side_effect=lambda p:{'lakers-intro.mp4':4,'la-scenery.mp4':136}.get(Path(p).name,1000)),patch.object(nh,'render_clip',side_effect=render),patch.object(nh,'run',side_effect=concatenate):
+            with patch.object(nh,'probe_frame_rate',return_value='25'),patch('nba_highlight_maker.cover.generate_cover',return_value=root/'cover.png') as cover,patch.object(nh,'ROOT',root),patch.object(nh,'probe',side_effect=lambda p:{'lakers-intro.mp4':4,'la-scenery.mp4':136}.get(Path(p).name,1000)),patch.object(nh,'render_clip',side_effect=render),patch.object(nh,'run',side_effect=concatenate):
                 nh.export(SimpleNamespace(review=str(review)))
             cover.assert_called_once_with(root.resolve(),review=review.resolve(),players=list(nh.PLAYERS))
             metadata=json.loads((root/'export.json').read_text())

@@ -1,15 +1,60 @@
 import shutil
+import csv
 import subprocess
 import tempfile
 import unittest
+from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from nba_highlight_maker import processing as nh
 
 
+class FrameRateTests(unittest.TestCase):
+    def test_exact_frame_rates_and_invalid_metadata(self):
+        for raw,expected in [('60000/1001\n','60000/1001'),('30000/1001','30000/1001'),('25/1','25')]:
+            with self.subTest(raw=raw),patch.object(nh,'run',return_value=raw):
+                self.assertEqual(nh.probe_frame_rate(Path('source.mp4')),expected)
+        for raw in ['', '0/0', '0/1', '-25', 'N/A', 'nan']:
+            with self.subTest(raw=raw),patch.object(nh,'run',return_value=raw),self.assertRaisesRegex(ValueError,'帧率'):
+                nh.probe_frame_rate(Path('source.mp4'))
+
+
 @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'),'需要 FFmpeg')
 class RenderClipTests(unittest.TestCase):
+    def test_real_export_keeps_fractional_match_rate_across_opening_concat(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            for name,rate in [('intro','25'),('match','60000/1001')]:
+                nh.run(['ffmpeg','-v','error','-f','lavfi','-i',f'color=black:s=320x180:r={rate}',
+                        '-f','lavfi','-i','anullsrc=r=48000:cl=stereo','-t','0.4',
+                        '-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-y',root/(name+'.mp4')])
+            row=dict.fromkeys(nh.FIELDS,'')
+            row.update(event_id='1',period='1',player='doncic',source=str(root/'match.mp4'),start='0',end='0.4',status='keep')
+            review=root/'review.csv'
+            with review.open('w',newline='') as file:
+                writer=csv.DictWriter(file,fieldnames=nh.FIELDS);writer.writeheader();writer.writerow(row)
+            with patch('nba_highlight_maker.cover.generate_cover',return_value=root/'cover.png'):
+                nh.export(SimpleNamespace(review=str(review),prepend=[str(root/'intro.mp4')],watermark=False))
+            output=root/'highlights.mp4'
+            self.assertEqual(Fraction(nh.probe_frame_rate(output)),Fraction('60000/1001'))
+            self.assertAlmostEqual(nh.probe(output),0.8,delta=0.15)
+            nh.run(['ffmpeg','-v','error','-i',output,'-f','null','-'])
+
+    def test_source_fractional_rate_is_preserved_and_opening_can_match_it(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            for source_rate,override in [('60000/1001',None),('25','60000/1001')]:
+                with self.subTest(source_rate=source_rate):
+                    source=root/'source.mp4';output=root/'clip.mp4'
+                    nh.run(['ffmpeg','-v','error','-f','lavfi','-i',f'color=black:s=320x180:r={source_rate}',
+                            '-f','lavfi','-i','anullsrc=r=48000:cl=stereo','-t','0.8',
+                            '-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-y',source])
+                    nh.render_clip(source,0,0.4,output,frame_rate=override)
+                    self.assertEqual(Fraction(nh.probe_frame_rate(output)),Fraction('60000/1001'))
+                    self.assertAlmostEqual(nh.probe(output),0.4,delta=0.06)
+
     def test_logo_visible_only_when_requested_and_audio_survives(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);source=root/'source.mp4'

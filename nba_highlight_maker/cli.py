@@ -7,11 +7,16 @@ from nba_highlight_maker import download as download
 from nba_highlight_maker import processing as processing
 from nba_highlight_maker import cover as covers
 from nba_highlight_maker import review as review_console
+from nba_highlight_maker import games
 
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     commands=parser.add_subparsers(dest="command",required=True)
+    listing=commands.add_parser('games',help='查询比赛 Game ID 和对阵（北京时间）')
+    listing.add_argument('--date',help='北京时间日期 YYYY-MM-DD；默认今天')
+    listing.add_argument('--team',nargs='+',default=[],help='英文球队代码，如 LAL、LAC（不区分大小写）；多个球队匹配任意一队')
+    listing.set_defaults(handler=games.list_games)
     downloading=commands.add_parser("download",help="下载、识别节次并归档")
     downloading.add_argument("urls",nargs="+",help="一个或多个完整微博或 YouTube HTTPS 地址")
     downloading.add_argument("--game-id",help="默认使用当前唯一缓存比赛；多场比赛时必须指定")
@@ -25,7 +30,7 @@ def main(argv=None):
     analysis.add_argument("--game-id",required=True)
     analysis.add_argument("--refresh-data",action="store_true")
     analysis.add_argument('--output-dir',help='独立分析目录，避免与已有人工审核表混用')
-    analysis.add_argument('--players',nargs='+',help='本场出场球员 ID；默认分析全部出场球员')
+    analysis.add_argument('--players',nargs='+',help='本场出场球员 ID；省略时必须已有保存的球员选择')
     analysis.set_defaults(handler=processing.analyze)
     adjusting=commands.add_parser('adjust',help='按事件编号修改区间、确认保留并更新单段预览')
     adjusting.add_argument('event_id',help='日志或审核表中的事件编号，不是进度序号')

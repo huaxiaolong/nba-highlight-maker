@@ -12,6 +12,41 @@ from nba_highlight_maker import review as review
 
 
 class ReviewStoreTests(unittest.TestCase):
+    def test_downloaded_game_can_select_players_before_analysis(self):
+        from tests.test_players import game_info
+        self.csv.unlink()
+        info=dict(game_info(),game_id=self.output.name,home='LAL',away='GSW')
+        (self.output/'source.json').write_text(json.dumps(info))
+        recordings=self.root/'recordings'/'new-game';recordings.mkdir(parents=True)
+        (recordings/'Q1.mp4').write_bytes(b'video')
+        (recordings/'recordings.json').write_text(json.dumps(dict(game_id=self.output.name,recordings=[dict(file='Q1.mp4',periods=[1])])))
+        boards=self.store.library()
+        self.assertEqual(len(boards),1)
+        self.assertIn('待分析',boards[0]['label'])
+        identifier=boards[0]['id'];snapshot=self.store.snapshot(identifier)
+        self.assertFalse(snapshot['analyzed'])
+        self.assertEqual(snapshot['selected_players'],[])
+        self.assertEqual(snapshot['rows'],[])
+        self.assertIn(str(recordings),snapshot['analyze_command'])
+        with patch.object(nh,'review_events') as events:
+            selected=self.store.select_players(dict(id=identifier,revision=snapshot['revision'],players=['201939']))
+        events.assert_not_called()
+        self.assertEqual(selected['selected_players'],['201939'])
+        self.assertFalse(self.csv.exists())
+        self.assertEqual(self.store.snapshot(identifier)['selected_players'],['201939'])
+        self.write()
+        self.assertEqual(self.store.library()[0]['id'],identifier)
+        self.assertTrue(self.store.snapshot(identifier)['analyzed'])
+
+    def test_download_registry_finds_custom_directory(self):
+        from tests.test_players import game_info
+        self.csv.unlink()
+        (self.output/'source.json').write_text(json.dumps(dict(game_info(),game_id=self.output.name)))
+        (self.output/'download.json').write_text(json.dumps(dict(game_dir=str(self.root))))
+        (self.root/'recordings.json').write_text(json.dumps(dict(game_id=self.output.name,recordings=[dict(file='source.mp4',periods=[1])])))
+        self.assertEqual(len(self.store.library()),1)
+        self.assertIn(str(self.root),self.store.snapshot(self.identifier)['analyze_command'])
+
     def setUp(self):
         self.folder=tempfile.TemporaryDirectory();self.addCleanup(self.folder.cleanup)
         self.root=Path(self.folder.name);self.output=self.root/'output'/'0012600036';self.output.mkdir(parents=True)

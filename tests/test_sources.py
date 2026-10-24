@@ -76,7 +76,7 @@ class SourceTests(unittest.TestCase):
                 dict(file=p.name,periods=[1],source_type='highlights',ocr_profile='spectrum') for p in paths]))
             events=nh.select_events(dict(actions=[shot(),dict(shot(2),period=2)]),{1,2})
             with patch.object(nh,'load_game',return_value=(dict(actions=[shot(),dict(shot(2),period=2)]),dict(home='LAL',away='SAC'))),patch.object(nh,'vision_binary'),patch.object(nh,'probe',return_value=100),patch.object(nh,'scan_video',return_value=[]) as scan,patch.object(nh,'locate_event',return_value=dict(candidates=[10],status='keep',reason='test')),patch.object(nh,'render_clip'):
-                args=SimpleNamespace(game_id='0012600036',game_dir=str(root),refresh_data=False,output_dir=str(output))
+                args=SimpleNamespace(game_id='0012600036',game_dir=str(root),refresh_data=False,output_dir=str(output),players=list(nh.PLAYERS))
                 nh.analyze(args)
                 nh.mark(SimpleNamespace(review=str(output/'review.csv'),event_id='1',player='doncic',status='missing',reason='人工确认'))
                 nh.analyze(args)
@@ -125,7 +125,7 @@ class SourceTests(unittest.TestCase):
             def download(url,stage):
                 path=stage/'video.mp4';path.write_bytes(url.encode());return path
             def metadata(arguments): return json.dumps(dict(id=arguments[-1].split('/')[-1],title='Highlights'))
-            with patch.object(nd,'context',return_value=(root,dict(actions=[dict(period=1)]),dict(home='LAL',away='SAC'))),patch.object(nd,'invoke_ytdlp',side_effect=metadata),patch.object(nd,'download_media',side_effect=download),patch.object(nd,'identify_video',return_value=dict(name='HIGHLIGHTS.mp4',periods=[1],full=False,evidence={})):
+            with patch.object(nh,'ROOT',root),patch.object(nd,'context',return_value=(root,dict(actions=[dict(period=1)]),dict(home='LAL',away='SAC'))),patch.object(nd,'invoke_ytdlp',side_effect=metadata),patch.object(nd,'download_media',side_effect=download),patch.object(nd,'identify_video',return_value=dict(name='HIGHLIGHTS.mp4',periods=[1],full=False,evidence={})):
                 nd.download_all(args)
             records=json.loads((root/'recordings.json').read_text())['recordings']
             self.assertEqual(len({r['file'] for r in records}),2)
@@ -143,7 +143,7 @@ class SourceTests(unittest.TestCase):
             with review.open('w',newline='') as f:
                 writer=csv.DictWriter(f,fieldnames=nh.FIELDS);writer.writeheader();writer.writerows(rows)
             def concatenate(command,progress=None): Path(command[-1]).write_bytes(b'final');return ''
-            with patch.object(nh,'ROOT',root),patch('nba_highlight_maker.cover.generate_cover',return_value=root/'cover.png'),patch.object(nh,'probe',return_value=100) as probe,patch.object(nh,'render_clip'),patch.object(nh,'run',side_effect=concatenate):
+            with patch.object(nh,'probe_frame_rate',return_value='25'),patch.object(nh,'ROOT',root),patch('nba_highlight_maker.cover.generate_cover',return_value=root/'cover.png'),patch.object(nh,'probe',return_value=100) as probe,patch.object(nh,'render_clip'),patch.object(nh,'run',side_effect=concatenate):
                 nh.export(SimpleNamespace(review=str(review)))
             self.assertNotIn(root.resolve(),[call.args[0] for call in probe.call_args_list])
             metadata=json.loads((root/'export.json').read_text())
@@ -157,7 +157,7 @@ class SourceTests(unittest.TestCase):
             args=SimpleNamespace(urls=['https://weibo.com/123/a','https://youtu.be/a'],game_id='0012600036',game_dir=str(root),refresh_data=False,source_type='recording',ocr_profile='espn')
             def download(url,stage):
                 path=stage/'video.mp4';path.write_bytes(url.encode());return path
-            with patch.object(nd,'context',return_value=(root,dict(actions=[dict(period=1)]),dict(home='LAL',away='SAC'))),patch.object(nd,'invoke_ytdlp',return_value=json.dumps(dict(id='same-id',title='Q1'))),patch.object(nd,'download_media',side_effect=download),patch.object(nd,'identify_video',side_effect=lambda *args:dict(name='Q1.mp4',periods=[1],full=False,evidence={})):
+            with patch.object(nh,'ROOT',root),patch.object(nd,'context',return_value=(root,dict(actions=[dict(period=1)]),dict(home='LAL',away='SAC'))),patch.object(nd,'invoke_ytdlp',return_value=json.dumps(dict(id='same-id',title='Q1'))),patch.object(nd,'download_media',side_effect=download),patch.object(nd,'identify_video',side_effect=lambda *args:dict(name='Q1.mp4',periods=[1],full=False,evidence={})):
                 nd.download_all(args)
             records=json.loads((root/'recordings.json').read_text())['recordings']
             self.assertEqual(len(records),2)

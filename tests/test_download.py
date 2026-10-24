@@ -84,6 +84,8 @@ class ProgressTests(unittest.TestCase):
 
 class ArchiveTests(unittest.TestCase):
     def setup_download(self,root):
+        root_patch=patch.object(nh,'ROOT',root)
+        root_patch.start();self.addCleanup(root_patch.stop)
         url='https://weibo.com/123/test'
         stage=root/'.downloads'/hashlib.sha256(url.encode()).hexdigest()[:16]
         stage.mkdir(parents=True)
@@ -112,6 +114,7 @@ class ArchiveTests(unittest.TestCase):
             self.assertEqual((root/'Q2.mp4').read_bytes(),b'video')
             self.assertFalse(source.exists())
             self.assertEqual(len(json.loads((root/'recordings.json').read_text())['recordings']),1)
+            self.assertEqual(json.loads((root/'output'/'0012600036'/'download.json').read_text())['game_dir'],str(root))
 
     def test_full_game_missing_official_overtime_is_not_archived(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -165,7 +168,7 @@ class ArchiveTests(unittest.TestCase):
             pbp=dict(actions=events)
             info=dict(home='LAL',away='SAC')
             with patch.object(nh,'ROOT',root),patch.object(nh,'load_game',return_value=(pbp,info)),patch.object(nh,'select_events',return_value=events),patch.object(nh,'vision_binary'),patch.object(nh,'probe',return_value=1000),patch.object(nh,'scan_video',return_value=[]) as scan,patch.object(nh,'locate_event',return_value=dict(candidates=[100],status='keep',reason='test')),patch.object(nh,'render_clip') as render:
-                nh.analyze(SimpleNamespace(game_id='0012600036',game_dir=str(root),refresh_data=False))
+                nh.analyze(SimpleNamespace(game_id='0012600036',game_dir=str(root),refresh_data=False,players=['doncic']))
             scan.assert_called_once()
             self.assertEqual(render.call_args_list[-1].args[-1].name,'doncic_OT1_5.mp4')
             self.assertFalse(json.loads((root/'output'/'0012600036'/'analysis.json').read_text())['partial'])

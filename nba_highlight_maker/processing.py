@@ -1,6 +1,7 @@
 """Official NBA data, Vision alignment, review files, and highlight export."""
 import csv
 from collections import Counter
+from fractions import Fraction
 import datetime as dt
 import hashlib
 import json
@@ -317,6 +318,17 @@ def probe(path,require_audio=True):
     return float(data["format"]["duration"])
 
 
+def probe_frame_rate(path):
+    raw=run(['ffprobe','-v','error','-select_streams','v:0','-show_entries',
+             'stream=avg_frame_rate','-of','default=noprint_wrappers=1:nokey=1',path])
+    try:
+        rate=Fraction(raw.strip())
+        if rate<=0:raise ValueError('帧率必须为正数')
+    except (ValueError,ZeroDivisionError) as error:
+        raise ValueError('无法读取有效视频帧率：'+str(path)) from error
+    return str(rate)
+
+
 def vision_binary():
     source = ROOT / "native" / "vision_ocr.swift"
     binary = ROOT / ".cache" / "vision_ocr"
@@ -517,7 +529,7 @@ def scan_video(path, output, events, binary, duration,ocr_profile="espn"):
     return samples
 
 
-def render_clip(source, start, end, destination,progress=None,watermark=False,allow_silent=False):
+def render_clip(source, start, end, destination,progress=None,watermark=False,allow_silent=False,frame_rate=None):
     temporary = destination.with_name(destination.stem + ".tmp.mp4")
     command=["ffmpeg", "-v", "error", "-ss", start, "-i", source]
     audio='0:a:0'
@@ -535,7 +547,7 @@ def render_clip(source, start, end, destination,progress=None,watermark=False,al
     else:
         command.extend(["-vf",scale,"-map","0:v:0"])
     run([*command,"-t",round(end-start,3),"-map", audio,
-         "-r", "25", "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
+         "-r", frame_rate or probe_frame_rate(source), "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
          "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", "-y", temporary],progress=progress)
     os.replace(temporary, destination)
 
@@ -558,7 +570,11 @@ def analyze(args):
     highlight_mode=any(item['source_type']=='highlights' for group in sources.values() for item in group)
     people=roster(info)
     requested=getattr(args,'players',None)
-    keys=select_keys(people,load_selection(output) if requested is None else requested)
+    if requested is None:requested=load_selection(output)
+    if requested is None:
+        available='\n'.join(f"{p['id']}  {p['team']}  {p['name']}" for p in people.values())
+        raise ValueError('请先选择球员：在页面应用球员，或添加 --players 球员ID ...。出场名单：\n'+available)
+    keys=select_keys(people,requested)
     players={key:(people[key]['id'],people[key]['last_name']) for key in keys}
     names={key:p['name'] for key,p in people.items()}
     events = select_events(pbp,{a['period'] for a in pbp['actions']} if highlight_mode else set(videos),players)
@@ -662,6 +678,7 @@ def analyze(args):
                  analysis_seconds=round(time.monotonic()-started,2),
                  note="automatic 统计本次算法候选，pending 统计保留人工改动后的审核表；两者可不同")
     atomic_json(output/"analysis.json",summary)
+    atomic_json(output/'players.json',dict(selected_players=keys))
     print(f"分析完成：处理 {len(events)} 段候选，生成 {preview_count} 段预览；审核表有 {pending} 段待确认。审核表：{review}",flush=True)
 
 
@@ -840,6 +857,7 @@ def export(args):
         validate_range(0,duration,duration)
         opening.append((0,str(path),0,duration))
     intro_seconds=sum(end for _,_,_,end in opening)
+    frame_rate=str(max(Fraction(probe_frame_rate(source)) for source in durations))
     from nba_highlight_maker.cover import generate_cover
     cover_path=generate_cover(review.parent,review=review,players=keys)
     seconds=intro_seconds+sum(end-start for _,_,start,end in ranges)
@@ -850,6 +868,7 @@ def export(args):
     unique_events=len({(p,e) for p,_,_,_,e in selected})
     print(f"合并导出：{len(selected)} 条审核记录 → {unique_events} 个回合 → {len(ranges)} 段比赛；开场 {intro_seconds:.3f} 秒，预计成片 {format_video_time(seconds)}",flush=True)
     print(f"导出选项：前置视频 {len(opening)} 段；2K 水印 {'开启' if watermark else '关闭'}",flush=True)
+    print(f'输出帧率：{frame_rate}（沿用比赛素材；多源取最高帧率）',flush=True)
     print(f"导出任务：编码 {total_clips} 段（含开场），拼接 1 条集锦。百分比对应当前编码或拼接阶段。",flush=True)
     with tempfile.TemporaryDirectory(prefix="nba-export-",dir=review.parent) as folder:
         directory=Path(folder)
@@ -858,7 +877,7 @@ def export(args):
             destination=directory/f"{i:04d}.mp4"
             print(f"编码 [{i+1}/{total_clips}]：{Path(source).name} {format_video_time(start)} → {format_video_time(end)}",flush=True)
             options=dict(allow_silent=True) if i<len(opening) else {}
-            render_clip(source,start,end,destination,progress=Progress(f"片段编码 {i+1}/{total_clips}",end-start,'秒'),watermark=watermark and i>=len(opening),**options)
+            render_clip(source,start,end,destination,progress=Progress(f"片段编码 {i+1}/{total_clips}",end-start,'秒'),watermark=watermark and i>=len(opening),frame_rate=frame_rate,**options)
             clips.append(destination)
         concat=directory/"concat.txt"
         concat.write_text("".join(f"file '{path.name}'\n" for path in clips))
@@ -870,7 +889,7 @@ def export(args):
         destination=review.parent/"highlights.mp4"
         os.replace(temporary,destination)
         print("已导出",destination,flush=True)
-    atomic_json(review.parent/"export.json",dict(players=counts,selected_players=keys,
+    atomic_json(review.parent/"export.json",dict(players=counts,selected_players=keys,frame_rate=frame_rate,
                 output=str(destination),unique_events=unique_events,shared_duplicates=len(selected)-unique_events,
                 cover=str(cover_path),
                 cover_4x3=str(review.parent/'cover_4x3.png'),cover_3x4=str(review.parent/'cover_3x4.png'),title=str(review.parent/'title.txt'),description=str(review.parent/'description.txt'),

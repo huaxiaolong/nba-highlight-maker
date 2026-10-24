@@ -36,6 +36,26 @@ class CombinedRangesTests(unittest.TestCase):
 
 
 class CombinedExportTests(unittest.TestCase):
+    def setUp(self):
+        patcher=patch.object(nh,'probe_frame_rate',return_value='60000/1001')
+        self.frame_rate=patcher.start();self.addCleanup(patcher.stop)
+
+    def test_mixed_match_sources_use_highest_rate_for_all_segments(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);review=root/'review.csv'
+            rows=[]
+            for index,player in enumerate(['doncic','reaves']):
+                row=dict.fromkeys(nh.FIELDS,'')
+                row.update(event_id=str(index+1),period='1',player=player,source=str(root/f'{index}.mp4'),start='0',end='5',status='keep')
+                rows.append(row)
+            with review.open('w',newline='') as file:
+                writer=csv.DictWriter(file,fieldnames=nh.FIELDS);writer.writeheader();writer.writerows(rows)
+            self.frame_rate.side_effect=lambda path:'25' if Path(path).name=='0.mp4' else '60000/1001'
+            def concat(command,**kwargs):Path(command[-1]).write_bytes(b'video')
+            with patch('nba_highlight_maker.cover.generate_cover',return_value=root/'cover.png'),patch.object(nh,'probe',return_value=10),patch.object(nh,'render_clip') as render,patch.object(nh,'run',side_effect=concat):
+                nh.export(SimpleNamespace(review=str(review)))
+            self.assertEqual([c.kwargs['frame_rate'] for c in render.call_args_list],['60000/1001']*2)
+
     def test_optional_opening_and_watermark_are_independent(self):
         for prepend in [None, ['custom.mp4'], ['custom.mp4', 'second.mov']]:
             for watermark in [False,True]:
@@ -54,9 +74,11 @@ class CombinedExportTests(unittest.TestCase):
                         nh.export(SimpleNamespace(review=str(review),prepend=paths,watermark=watermark))
                     self.assertEqual([Path(c.args[0]).name for c in render.call_args_list],(prepend or [])+['Q1.mp4'])
                     self.assertEqual([c.kwargs['watermark'] for c in render.call_args_list],[False]*len(prepend or [])+[watermark])
+                    self.assertTrue(all(c.kwargs['frame_rate']=='60000/1001' for c in render.call_args_list))
                     metadata=json.loads((root/'export.json').read_text())
                     self.assertEqual(metadata['prepend'],paths or [])
                     self.assertEqual(metadata['watermark']['enabled'],watermark)
+                    self.assertEqual(metadata['frame_rate'],'60000/1001')
                     self.assertEqual(metadata['expected_duration_seconds'],5+4*len(prepend or []))
 
     def test_opening_cannot_be_the_output_and_failed_probe_preserves_output(self):
